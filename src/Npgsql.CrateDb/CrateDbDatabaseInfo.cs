@@ -44,7 +44,7 @@ namespace Npgsql.CrateDb
             { "_varchar", 1015 }
         };
 
-        NpgsqlConnection conn;
+        readonly NpgsqlConnection conn;
 
         /// <summary>
         /// Creates an instance of the CrateDbDatabaseInfo class.
@@ -65,6 +65,29 @@ namespace Npgsql.CrateDb
             IEnumerable<PostgresType> arrayTypes = CrateDbArrayTypes.Select(p => new CrateDbArrayType(p.Key, p.Value, baseTypes.FirstOrDefault(t => String.Equals(t.Name, p.Key.Substring(1)))));
 
             return baseTypes.Concat(arrayTypes);
+        }
+        /// <summary>
+        /// Adapts a dictionary of type mappings to CrateDB.
+        /// </summary>
+        /// <param name="mappings"></param>
+        protected override void AdaptTypeMappings(IDictionary<string, NpgsqlTypeMapping> mappings)
+        {
+            // Remove unsupported mappings to reduce the number 
+            // of ArgumentExceptions thrown and log entries created.
+            var unsupportedTypes = mappings.Where(m => !CrateDbBaseTypes.ContainsKey(m.Value.PgTypeName) && !CrateDbArrayTypes.ContainsKey(m.Value.PgTypeName)).ToList();
+            foreach (var t in unsupportedTypes)
+            {
+                mappings.Remove(t.Key);
+            }
+
+            // Add mappings specific to CrateDB.
+            foreach(var t in CrateDbSpecificTypeMappings())
+            {
+                if (mappings.ContainsKey(t.PgTypeName))
+                    mappings[t.PgTypeName] = t;
+                else
+                    mappings.Add(t.PgTypeName, t);
+            }
         }
 
         /// <summary>
@@ -99,17 +122,11 @@ namespace Npgsql.CrateDb
         /// Returns a boolean value that signals if the current database supports advisory lock functions.
         /// </summary>
         public override bool SupportsAdvisoryLocks => false;
-
-        /// <summary>
-        /// Adds type mappings specific to CrateDB to the given INpgsqlTypeMapper.
-        /// </summary>
-        /// <param name="mapper"></param>
-        public static void AddCrateDbSpecificTypeMappings(INpgsqlTypeMapper mapper)
+        
+        static IEnumerable<NpgsqlTypeMapping> CrateDbSpecificTypeMappings()
         {
-            RemoveUnsupportedDataTypes(mapper);
-
             // Map CrateDB varchar type to the Npgsql TextHandler.
-            mapper.AddMapping(new NpgsqlTypeMappingBuilder
+            yield return new NpgsqlTypeMappingBuilder
             {
                 PgTypeName = "varchar",
                 NpgsqlDbType = NpgsqlDbType.Varchar,
@@ -118,10 +135,10 @@ namespace Npgsql.CrateDb
                 InferredDbType = DbType.String,
                 TypeHandlerFactory = new TextHandlerFactory()
             }
-            .Build());
+            .Build();
 
             // Map CrateDB timestampz type to the CrateDbTimestampHandler.
-            mapper.AddMapping(new NpgsqlTypeMappingBuilder
+            yield return new NpgsqlTypeMappingBuilder
             {
                 PgTypeName = "timestampz",
                 NpgsqlDbType = NpgsqlDbType.TimestampTz,
@@ -129,22 +146,7 @@ namespace Npgsql.CrateDb
                 ClrTypes = new[] { typeof(DateTime) },
                 TypeHandlerFactory = new CrateDbTimestampHandlerFactory()
             }
-            .Build());
-
-            //mapper.UseCrateDbObjectHandler();
-        }
-
-        /// <summary>
-        /// Removes mappings for data types not supported by CrateDB.
-        /// </summary>
-        /// <param name="mapper"></param>
-        public static void RemoveUnsupportedDataTypes(INpgsqlTypeMapper mapper)
-        {
-            var unsupportedTypes = mapper.Mappings.Where(m => !CrateDbBaseTypes.ContainsKey(m.PgTypeName) && !CrateDbArrayTypes.ContainsKey(m.PgTypeName)).ToList();
-            foreach (var t in unsupportedTypes)
-            {
-                mapper.RemoveMapping(t.PgTypeName);
-            }
+            .Build();
         }
     }
 
