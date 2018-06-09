@@ -25,7 +25,7 @@ namespace Npgsql.CrateDb
             { "float4", 700 },
             { "char", 18 },
             { "int8", 20 },
-            { "timestampz", 1184 },
+            { "timestamptz", 1184 },
             { "float8", 701 },
             { "varchar", 1043 }
         };
@@ -39,9 +39,21 @@ namespace Npgsql.CrateDb
             { "_float4", 1021 },
             { "_char", 1002 },
             { "_int8", 1016 },
-            { "_timestampz", 1185 },
+            { "_timestamptz", 1185 },
             { "_float8", 1022 },
             { "_varchar", 1015 }
+        };
+
+        static readonly IDictionary<string, string> PgTypeNameToInternalName = new Dictionary<string, string>
+        {
+            { "boolean", "bool" },
+            { "smallint", "int2" },
+            { "integer", "int4" },
+            { "real", "float4" },
+            { "bigint", "int8" },
+            { "timestamp with time zone", "timestamptz" },
+            { "double precision", "float8" },
+            { "character varying", "varchar" }
         };
 
         readonly NpgsqlConnection conn;
@@ -62,10 +74,11 @@ namespace Npgsql.CrateDb
         protected override IEnumerable<PostgresType> GetTypes()
         {
             IEnumerable<PostgresType> baseTypes = CrateDbBaseTypes.Select(p => new CrateDbBaseType(p.Key, p.Value)).ToList();
-            IEnumerable<PostgresType> arrayTypes = CrateDbArrayTypes.Select(p => new CrateDbArrayType(p.Key, p.Value, baseTypes.FirstOrDefault(t => String.Equals(t.Name, p.Key.Substring(1)))));
+            IEnumerable<PostgresType> arrayTypes = CrateDbArrayTypes.Select(p => new CrateDbArrayType(p.Key, p.Value, baseTypes.FirstOrDefault(t => String.Equals(t.InternalName, p.Key.Substring(1)))));
 
             return baseTypes.Concat(arrayTypes);
         }
+
         /// <summary>
         /// Adapts a dictionary of type mappings to CrateDB.
         /// </summary>
@@ -74,7 +87,7 @@ namespace Npgsql.CrateDb
         {
             // Remove unsupported mappings to reduce the number 
             // of ArgumentExceptions thrown and log entries created.
-            var unsupportedTypes = mappings.Where(m => !CrateDbBaseTypes.ContainsKey(m.Value.PgTypeName) && !CrateDbArrayTypes.ContainsKey(m.Value.PgTypeName)).ToList();
+            var unsupportedTypes = mappings.Where(m => !IsPgTypeSupportedByCrateDb(m.Value.PgTypeName)).ToList();
             foreach (var t in unsupportedTypes)
             {
                 mappings.Remove(t.Key);
@@ -128,7 +141,7 @@ namespace Npgsql.CrateDb
             // Map CrateDB varchar type to the Npgsql TextHandler.
             yield return new NpgsqlTypeMappingBuilder
             {
-                PgTypeName = "varchar",
+                PgTypeName = "character varying",
                 NpgsqlDbType = NpgsqlDbType.Varchar,
                 DbTypes = new[] { DbType.String, DbType.StringFixedLength, DbType.AnsiString, DbType.AnsiStringFixedLength },
                 ClrTypes = new[] { typeof(string), typeof(char[]), typeof(char) },
@@ -140,13 +153,19 @@ namespace Npgsql.CrateDb
             // Map CrateDB timestampz type to the CrateDbTimestampHandler.
             yield return new NpgsqlTypeMappingBuilder
             {
-                PgTypeName = "timestampz",
+                PgTypeName = "timestamp with time zone",
                 NpgsqlDbType = NpgsqlDbType.TimestampTz,
                 DbTypes = new[] { DbType.DateTime },
                 ClrTypes = new[] { typeof(DateTime) },
                 TypeHandlerFactory = new CrateDbTimestampHandlerFactory()
             }
             .Build();
+        }
+
+        static bool IsPgTypeSupportedByCrateDb(string pgTypeName)
+        {
+            string internalName = PgTypeNameToInternalName.ContainsKey(pgTypeName) ? PgTypeNameToInternalName[pgTypeName] : pgTypeName;
+            return CrateDbBaseTypes.ContainsKey(internalName) || CrateDbArrayTypes.ContainsKey(internalName);
         }
     }
 
